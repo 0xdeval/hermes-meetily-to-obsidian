@@ -91,7 +91,7 @@ class ProcessedDB:
     def mark_processed(self, source_path: str, fingerprint: str | None, meeting_id: str | None):
         self.conn.execute(
             "INSERT OR REPLACE INTO processed (source_path, source_fingerprint, meeting_id, processed_at) VALUES (?, ?, ?, ?)",
-            (source_path, fingerprint, meeting_id, dt.datetime.utcnow().isoformat()),
+            (source_path, fingerprint, meeting_id, dt.datetime.now(dt.timezone.utc).isoformat()),
         )
         self.conn.commit()
 
@@ -165,7 +165,7 @@ def parse_meeting_folder(folder: Path) -> dict[str, Any]:
 
     transcript_text = "\n".join(lines).strip() or "- (no transcript text found)"
     title = slugify(meeting_name.replace("_", " "))
-    date_source = completed_at or created_at or dt.datetime.utcnow().astimezone()
+    date_source = completed_at or created_at or dt.datetime.now(dt.timezone.utc)
     date_folder = date_source.strftime("%d-%m-%Y")
 
     return {
@@ -197,7 +197,7 @@ def parse_markdown_export(path: Path) -> dict[str, Any]:
         m = re.search(r"^#\s+(.+)$", text, re.M)
         title = m.group(1).strip() if m else path.stem
 
-    date_source = parse_iso_datetime(meta.get("date")) or dt.datetime.utcnow().astimezone()
+    date_source = parse_iso_datetime(meta.get("date")) or dt.datetime.now(dt.timezone.utc)
     return {
         "meeting_name": title,
         "meeting_id": meta.get("meeting_id"),
@@ -213,7 +213,7 @@ def parse_markdown_export(path: Path) -> dict[str, Any]:
 
 
 def render_summary_template(template: str, data: dict[str, Any]) -> str:
-    date_value = data.get("completed_at") or data.get("created_at") or dt.datetime.utcnow().astimezone()
+    date_value = data.get("completed_at") or data.get("created_at") or dt.datetime.now(dt.timezone.utc)
     date_text = date_value.strftime("%d-%m-%Y") if isinstance(date_value, dt.datetime) else str(date_value)
     duration = render_duration(data.get("duration_seconds"))
     participants = str(data.get("participants", "")).strip()

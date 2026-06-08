@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Hermes Meetily export processor periodically
+Requires=hermes-meetily-watcher.service
+
+[Timer]
+OnBootSec=1m
+OnUnitActiveSec=1m
+Unit=hermes-meetily-watcher.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

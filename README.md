@@ -52,4 +52,4 @@ Useful options:
 - The processor ignores `.stignore`, `.stfolder`, hidden files, and `.processed/`.
 - The processor uses a small SQLite DB (`processed.db`) to skip duplicates.
 - Use `--reprocess-all` when you want to rebuild notes from the same source exports after deleting the Obsidian notes.
-- The included `hermes-meetily-watcher.service` is a sample systemd unit for running it as a service on the server.
+- The included `hermes-meetily-watcher.service` and `hermes-meetily-watcher.timer` are sample systemd units for running it periodically on the server.
