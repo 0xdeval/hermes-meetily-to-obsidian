@@ -59,7 +59,7 @@ If the exporter writes a single markdown file instead, the processor will still 
 
 For each meeting:
 
-- `summary.md` — topic-focused summary with key points around the topic
+- `summary.md` — Hermes-generated thematic summary without timestamps, grouped by topic
 - `raw.md` — full transcript text
 
 Example:

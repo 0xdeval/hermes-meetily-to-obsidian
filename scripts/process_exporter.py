@@ -24,9 +24,12 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import shutil
 import sqlite3
+import subprocess
+import textwrap
 import time
 from pathlib import Path
 from typing import Any
@@ -35,6 +38,7 @@ SKIP_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif", ".mp4", ".m
 SKIP_NAMES = {".processed", ".stfolder", ".stversions", ".DS_Store", ".stignore"}
 DB_PATH = Path(__file__).parent.parent / "processed.db"
 TEMPLATE_PATH = Path(__file__).parent.parent / "templates" / "summary-template.md"
+MAX_SUMMARY_TRANSCRIPT_CHARS = 20000
 
 
 def slugify(text: str) -> str:
@@ -212,33 +216,102 @@ def parse_markdown_export(path: Path) -> dict[str, Any]:
     }
 
 
-def render_summary_template(template: str, data: dict[str, Any]) -> str:
-    date_value = data.get("completed_at") or data.get("created_at") or dt.datetime.now(dt.timezone.utc)
-    date_text = date_value.strftime("%d-%m-%Y") if isinstance(date_value, dt.datetime) else str(date_value)
-    duration = render_duration(data.get("duration_seconds"))
-    participants = str(data.get("participants", "")).strip()
+def normalize_transcript_for_summary(transcript_text: str) -> str:
+    cleaned_lines: list[str] = []
+    for raw_line in transcript_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^-\s*\*\*\d{1,2}:\d{2}:\d{2}\*\*\s+—\s*", "", line)
+        line = re.sub(r"^-\s*", "", line)
+        if line:
+            cleaned_lines.append(line)
+    text = "\n".join(cleaned_lines)
+    return text[:MAX_SUMMARY_TRANSCRIPT_CHARS].strip()
 
-    transcript_text = data.get("transcript_text", "")
-    lines = [line.strip() for line in transcript_text.splitlines() if line.strip()]
 
-    topic = data.get("meeting_name") or data.get("title") or "Meeting"
-    topic = topic.replace("_", " ").strip()
+def fallback_summary(template: str, data: dict[str, Any]) -> str:
+    transcript_text = normalize_transcript_for_summary(data.get("transcript_text", ""))
+    lines = [line for line in transcript_text.splitlines() if line]
+    overview_lines = [f"- {line}" for line in lines[:3]] or ["- Summary unavailable."]
 
-    # Build a compact key-point list from the transcript. This is intentionally
-    # generic: the real topic extraction / structuring will later come from the LLM.
-    bullet_lines = []
-    for line in lines[:10]:
-        if line.startswith("-"):
-            bullet_lines.append(line)
-        else:
-            bullet_lines.append(f"- {line}")
-    key_points = "\n".join(bullet_lines) if bullet_lines else "- No key points extracted yet"
+    topic_chunks = []
+    for idx, chunk_start in enumerate(range(0, min(len(lines), 12), 4), start=1):
+        chunk = lines[chunk_start : chunk_start + 4]
+        if not chunk:
+            continue
+        topic_chunks.append(f"### Topic {idx}\n" + "\n".join(f"- {line}" for line in chunk))
 
     summary = template
-    summary = summary.replace("{{topic}}", topic)
-    summary = summary.replace("{{key_points}}", key_points)
-    summary += f"\nDate: {date_text}\nParticipants: {participants}\nDuration: {duration}\n"
-    return summary
+    summary = summary.replace("{{overview}}", "\n".join(overview_lines))
+    summary = summary.replace("{{topics}}", "\n\n".join(topic_chunks) or "### Topic 1\n- Summary unavailable.")
+    summary = summary.replace("{{next_steps}}", "- No explicit next steps extracted.")
+    return summary.strip() + "\n"
+
+
+def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
+    transcript_text = normalize_transcript_for_summary(data.get("transcript_text", ""))
+    if not transcript_text:
+        return fallback_summary(template, data)
+
+    meeting_name = str(data.get("meeting_name") or data.get("title") or "Meeting").replace("_", " ").strip()
+    participants = str(data.get("participants") or "").strip() or "Unknown"
+    duration = render_duration(data.get("duration_seconds"))
+
+    prompt = textwrap.dedent(
+        f"""\
+        Summarize this meeting transcript for an Obsidian note.
+
+        Requirements:
+        - Return markdown only.
+        - Do not include timestamps.
+        - Do not echo the transcript line-by-line.
+        - Extract the main ideas and organize them into thematic sections.
+        - Use concise, human-readable topic titles.
+        - Mention important context, decisions, constraints, concerns, and next steps.
+        - If there are no clear next steps, say so briefly.
+
+        Use exactly this structure:
+        ## Overview
+        - bullet
+        - bullet
+
+        ## Topics
+        ### Topic title
+        - bullet
+        - bullet
+
+        ### Topic title
+        - bullet
+        - bullet
+
+        ## Next steps
+        - bullet
+
+        Meeting name: {meeting_name}
+        Participants: {participants}
+        Duration: {duration}
+
+        Transcript:
+        {transcript_text}
+        """
+    ).strip()
+
+    cmd = ["hermes", "chat", "-q", prompt, "-Q", "-t", "safe"]
+    env = os.environ.copy()
+    env["PYTHONWARNINGS"] = "ignore"
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    summary = (result.stdout or "").strip()
+    if result.returncode != 0 or not summary:
+        raise RuntimeError(f"Hermes summarization failed: {result.stderr.strip() or result.stdout.strip()}")
+    return summary + "\n"
+
+
+def render_summary_template(template: str, data: dict[str, Any]) -> str:
+    try:
+        return generate_summary_with_hermes(template, data)
+    except Exception:
+        return fallback_summary(template, data)
 def render_duration(duration_seconds: Any) -> str:
     if isinstance(duration_seconds, (int, float)):
         mins = int(round(duration_seconds / 60))

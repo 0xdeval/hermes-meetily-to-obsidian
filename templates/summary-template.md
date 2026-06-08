@@ -1,5 +1,8 @@
-Topic: {{topic}}
+## Overview
+{{overview}}
 
-Key points:
-{{key_points}}
+## Topics
+{{topics}}
 
+## Next steps
+{{next_steps}}
