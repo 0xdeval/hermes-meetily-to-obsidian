@@ -1,7 +1,7 @@
 ---
 name: hermes-meetily-to-obsidian
 description: "Hermes skill to post-process Meetily / meetily-exporter meeting folders or markdown exports into structured Obsidian notes, deduplicate them, and clean up processed exports."
-version: 0.2.0
+version: 0.2.1
 author: 0xdeval + Mike Krupin
 license: MIT
 metadata:
@@ -19,15 +19,30 @@ It also supports a markdown-export fallback.
 
 ## Overview
 
-The workflow is:
+Start with one required question:
 
-1. Meetily exports a meeting folder on your Mac.
-2. Syncthing syncs that folder to the server.
-3. Hermes processes the synced export on the server.
-4. Hermes writes two notes into Obsidian:
+- Are Meetily, Obsidian, and Hermes running on the same machine?
+
+The workflow then branches:
+
+### Same machine
+
+1. Install or verify Meetily, Obsidian, and Hermes on that machine.
+2. Configure a local Meetily export folder.
+3. Run the processor against the local Obsidian vault.
+4. Skip Syncthing unless the user explicitly wants multi-device vault sync.
+
+### Separate machines
+
+1. Install Meetily on the user machine that produces the meeting exports.
+2. Install Syncthing on that user machine.
+3. Install or verify Syncthing on the Hermes/Obsidian server.
+4. Syncthing syncs the export folder to the server inbox.
+5. Hermes processes the synced export on the server.
+6. Hermes writes two notes into Obsidian:
    - `summary.md`
    - `raw.md`
-5. The processed export is kept on the server by default so it can be reprocessed later.
+7. The processed export is kept on the server by default so it can be reprocessed later.
 
 Meetings are stored under:
 
@@ -35,10 +50,11 @@ Meetings are stored under:
 
 ## When to Use
 
-- Meetily on macOS exports meeting folders or markdown files.
-- The export folder is synced to a server with Syncthing.
-- You want Hermes to normalize the meeting into Obsidian.
-- You want processed exports cleaned up so the export inbox stays empty.
+- Meetily exports meeting folders or markdown files.
+- Hermes should normalize the meeting into Obsidian.
+- The setup may be same-machine or split-machine.
+- If split-machine, the export folder is synced to a server with Syncthing.
+- You want the skill to verify service readiness before declaring setup complete.
 
 ## Expected Export Shape
 
@@ -98,11 +114,18 @@ You can also choose:
 
 ## Verification Checklist
 
-- [ ] Syncthing export folder exists on the server
+Always finish with a readiness check before telling the user the setup is done.
+
+- [ ] Asked whether Meetily, Obsidian, and Hermes are on the same machine
+- [ ] If same-machine: Meetily, Obsidian, and Hermes are installed and usable locally
+- [ ] If split-machine: Syncthing is installed on the user device and on the Hermes/Obsidian server
+- [ ] If split-machine: Syncthing services/processes are running and the shared folder is healthy
+- [ ] Server export folder exists and is writable
+- [ ] Obsidian vault exists and receives `summary.md` and `raw.md`
 - [ ] Meetily export folders contain `metadata.json` and `transcripts.json`
-- [ ] Obsidian receives `summary.md` and `raw.md`
-- [ ] The processed server-side export is cleaned up
+- [ ] Scheduler/service is running without current errors
 - [ ] Duplicates are skipped via the processed database
+- [ ] No current sync or processor issues remain in logs/status output
 
 ## Files
 

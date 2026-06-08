@@ -2,15 +2,32 @@
 
 Process Meetily exports from a Syncthing-synced inbox into structured Obsidian meeting notes.
 
+## First question
+
+Before setup, ask:
+
+- Are Meetily, Obsidian, and Hermes on the same machine?
+
 ## Flow
 
-1. Meetily exports a meeting folder on your Mac.
-2. Syncthing syncs that folder to the server inbox.
-3. Hermes processes the synced export on the server.
-4. Hermes writes:
+### Same machine
+
+1. Install or verify Meetily, Obsidian, and Hermes locally.
+2. Configure a local export folder.
+3. Run the processor against the local vault.
+4. Syncthing is optional.
+
+### Separate machines
+
+1. Install Meetily on the user device that creates the exports.
+2. Install Syncthing on that user device.
+3. Install or verify Syncthing on the Hermes/Obsidian server.
+4. Syncthing syncs the export folder to the server inbox.
+5. Hermes processes the synced export on the server.
+6. Hermes writes:
    - `summary.md`
    - `raw.md`
-5. The source export is kept on the server by default so it can be reprocessed later.
+7. The source export is kept on the server by default so it can be reprocessed later.
 
 ## Supported export shape
 
@@ -23,6 +40,14 @@ A folder containing:
 ### Markdown fallback
 
 A single markdown file with frontmatter and a transcript section.
+
+## Split-machine guide expectations
+
+If Meetily runs on a different machine than Hermes/Obsidian, the skill should provide a clear user guide for:
+
+- macOS: install Meetily, install Syncthing, choose the Meetily export folder, share it as Send Only
+- Windows: install Syncthing, choose the export folder on the machine producing the exports, share it as Send Only
+- Server: verify Syncthing is installed, receiving the export folder, and healthy before debugging the processor
 
 ## Server paths used in this setup
 
@@ -46,6 +71,20 @@ Useful options:
 - `--reprocess-all` — ignore the processed DB and regenerate notes for every export
 - `--cleanup-source move` — move processed exports into `.processed/`
 - `--cleanup-source keep` — leave the source export in place
+
+## Final readiness checklist
+
+Before returning a final "ready" state to the user, verify:
+
+- same-machine vs split-machine topology was identified
+- Meetily is installed or otherwise producing exports
+- Hermes command works on the processing machine
+- Obsidian vault path exists and is writable
+- if split-machine: Syncthing is installed on both sides
+- if split-machine: Syncthing health/status shows no active errors
+- processor script runs cleanly
+- scheduler/timer/cron is active if automation is expected
+- current logs/status checks show no unresolved issues
 
 ## Notes
 
