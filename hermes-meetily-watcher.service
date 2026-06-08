@@ -1,0 +1,13 @@
+[Unit]
+Description=Hermes Meetily Export Watcher
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/hermes-meetily-to-obsidian
+ExecStart=/usr/bin/env python3 /root/hermes-meetily-to-obsidian/scripts/process_exporter.py --export-dir /root/meetily_exports --vault /root/Obsidian --cleanup-source delete
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

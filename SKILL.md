@@ -1,38 +1,112 @@
 ---
 name: hermes-meetily-to-obsidian
-description: "Hermes skill to post-process Meetily/meetily-exporter markdown exports into structured Obsidian meeting notes (summary + raw transcript), deduplicate, and move processed exports into the Meetings folder."
-version: 0.1.0
+description: "Hermes skill to post-process Meetily / meetily-exporter meeting folders or markdown exports into structured Obsidian notes, deduplicate them, and clean up processed exports."
+version: 0.2.0
 author: 0xdeval + Mike Krupin
 license: MIT
-tags: [obsidian, meetily, meetily-exporter, exporter, meetings, automation]
+metadata:
+  hermes:
+    tags: [obsidian, meetily, meetily-exporter, meetings, automation, syncthing]
+    related_skills: [hermes-agent-skill-authoring]
 ---
 
 # hermes-meetily-to-obsidian
 
-This Hermes skill watches a directory used by the meetily-exporter (or other local exporter), post-processes each meeting export, generates a short summary (filling a template), writes two markdown files into the Obsidian vault under Meetings/dd-mm--yyyy/<meeting-title>/, and removes the original exporter file to avoid duplicates.
+This Hermes skill post-processes Meetily exports from a Syncthing-synced export folder and writes structured meeting notes into Obsidian.
 
-Features
-- Deduplication by exporter filename and meeting ID
-- Generates `summary.md` and `raw_transcript.md` per meeting
-- Uses a simple template for the summary (templates/summary-template.md)
-- Moves processed exports into a `.processed` subfolder (or deletes them) per your preference
+It is designed for the common Meetily export shape where each meeting is a directory containing `metadata.json` and `transcripts.json`.
+It also supports a markdown-export fallback.
 
-Usage
-- Place exported meeting markdown files into the exporter folder (configurable)
-- Run `scripts/process_exporter.py --export-dir /path/to/exporter --vault /root/Obsidian` or install as a cron job
+## Overview
 
-Files
-- SKILL.md (this file)
-- scripts/process_exporter.py — main processing script
-- templates/summary-template.md — summary template for notes
-- README.md — install & usage notes
+The workflow is:
 
-Design decisions
-- Meetings are stored under: <VAULT>/Meetings/dd-mm--yyyy/<short-title>/
-- Each meeting folder contains:
-  - summary.md — generated summary that matches the template
-  - raw_transcript.md — full raw transcript
+1. Meetily exports a meeting folder on your Mac.
+2. Syncthing syncs that folder to the server.
+3. Hermes processes the synced export on the server.
+4. Hermes writes two notes into Obsidian:
+   - `summary.md`
+   - `raw_transcript.md`
+5. The processed export is removed from the export folder on the server so it is not reprocessed.
 
-Publishing
-- This repo is intended to be published in your GitHub (you provided https://github.com/0xdeval/hermes-meetily-to-obsidian.git)
-- After confirming the repo push, I can open a PR to hermeshub as you requested (requires push permissions or a fork/PR flow).
+Meetings are stored under:
+
+`<VAULT>/Meetings/dd-mm--yyyy/<short-title>/`
+
+## When to Use
+
+- Meetily on macOS exports meeting folders or markdown files.
+- The export folder is synced to a server with Syncthing.
+- You want Hermes to normalize the meeting into Obsidian.
+- You want processed exports cleaned up so the export inbox stays empty.
+
+## Expected Export Shape
+
+### Meetily folder export
+
+A meeting folder should contain at least:
+
+- `metadata.json`
+- `transcripts.json`
+
+The processor reads these files, builds a readable transcript, then writes Obsidian notes.
+
+### Markdown export fallback
+
+If the exporter writes a single markdown file instead, the processor will still ingest it.
+
+## Output Layout in Obsidian
+
+For each meeting:
+
+- `summary.md` — summary template filled from the meeting content
+- `raw_transcript.md` — full transcript text
+
+Example:
+
+```text
+/root/Obsidian/Meetings/02-06--2026/Meeting 2026-06-02 16-29-27/
+  summary.md
+  raw_transcript.md
+```
+
+## Cleanup Behavior
+
+Default behavior is to delete the processed export from the exporter folder on the server.
+
+You can also choose:
+- `delete` — remove the source export after successful processing
+- `move` — move the source into `.processed/`
+- `keep` — leave the source in place
+
+## Common Pitfalls
+
+1. **Pointing the exporter directly at the Obsidian vault.**
+   Keep the Syncthing export inbox separate from the vault so you do not create sync loops.
+
+2. **Processing partial files.**
+   The processor waits for the export to be old enough and stable before handling it.
+
+3. **Syncthing bookkeeping files being processed.**
+   The script ignores `.stignore`, `.stfolder`, `.processed`, and hidden files.
+
+4. **Expecting one source export to create multiple Obsidian notes.**
+   This skill creates exactly one meeting folder per export.
+
+5. **Thinking cleanup will delete the Mac copy.**
+   If the server is the processing side, cleanup only removes the synced server copy unless you also build a Mac-side delete hook.
+
+## Verification Checklist
+
+- [ ] Syncthing export folder exists on the server
+- [ ] Meetily export folders contain `metadata.json` and `transcripts.json`
+- [ ] Obsidian receives `summary.md` and `raw_transcript.md`
+- [ ] The processed server-side export is cleaned up
+- [ ] Duplicates are skipped via the processed database
+
+## Files
+
+- `scripts/process_exporter.py` — main processor
+- `templates/summary-template.md` — summary template
+- `hermes-meetily-watcher.service` — sample systemd unit for the server
+- `README.md` — usage notes

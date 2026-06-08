@@ -1,19 +1,53 @@
-# README — hermes-meetily-to-obsidian
+# hermes-meetily-to-obsidian
 
-This Hermes skill processes meetily-exporter (or similar) markdown exports into structured Obsidian meeting notes.
+Process Meetily exports from a Syncthing-synced inbox into structured Obsidian meeting notes.
 
-Install
-- Clone this repo into your machine or place under ~/.hermes/skills/<category>/hermes-meetily-to-obsidian
+## Flow
 
-Usage
-- Run the processor:
+1. Meetily exports a meeting folder on your Mac.
+2. Syncthing syncs that folder to the server inbox.
+3. Hermes processes the synced export on the server.
+4. Hermes writes:
+   - `summary.md`
+   - `raw_transcript.md`
+5. The source export is removed from the server inbox after successful processing.
 
-  python3 scripts/process_exporter.py --export-dir /path/to/exporter --vault /root/Obsidian --move-processed
+## Supported export shape
 
-- Set up a cron job or Hermes cronjob to run periodically.
+### Meetily folder export
 
-Configuration
-- edit templates/summary-template.md to change the summary skeleton.
+A folder containing:
+- `metadata.json`
+- `transcripts.json`
 
-Publishing
-- Push this repo to https://github.com/0xdeval/hermes-meetily-to-obsidian.git and then open a PR to hermeshub as you requested.
+### Markdown fallback
+
+A single markdown file with frontmatter and a transcript section.
+
+## Server paths used in this setup
+
+- Syncthing inbox: `/root/meetily_exports`
+- Obsidian vault: `/root/Obsidian`
+- Output: `/root/Obsidian/Meetings/dd-mm--yyyy/<meeting-title>/`
+
+## Processor
+
+Run manually:
+
+```bash
+python3 scripts/process_exporter.py \
+  --export-dir /root/meetily_exports \
+  --vault /root/Obsidian \
+  --cleanup-source delete
+```
+
+Useful options:
+- `--dry-run` — preview what would be processed
+- `--cleanup-source move` — move processed exports into `.processed/`
+- `--cleanup-source keep` — leave the source export in place
+
+## Notes
+
+- The processor ignores `.stignore`, `.stfolder`, hidden files, and `.processed/`.
+- The processor uses a small SQLite DB (`processed.db`) to skip duplicates.
+- The included `hermes-meetily-watcher.service` is a sample systemd unit for running it as a service on the server.
