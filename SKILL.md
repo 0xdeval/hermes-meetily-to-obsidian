@@ -1,13 +1,14 @@
 ---
 name: hermes-meetily-to-obsidian
-description: "Hermes skill to post-process Meetily / meetily-exporter meeting folders or markdown exports into structured Obsidian notes, deduplicate them, and clean up processed exports."
-version: 0.2.1
+description: "Use when Meetily exports should be post-processed into structured Obsidian meeting notes with topology-aware setup, deduplication, summary generation, and readiness checks."
+version: 0.3.0
 author: 0xdeval + Mike Krupin
 license: MIT
+platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [obsidian, meetily, meetily-exporter, meetings, automation, syncthing]
-    related_skills: [hermes-agent-skill-authoring]
+    related_skills: [hermes-agent-skill-authoring, hermes-agent]
 ---
 
 # hermes-meetily-to-obsidian
@@ -56,6 +57,11 @@ Meetings are stored under:
 - If split-machine, the export folder is synced to a server with Syncthing.
 - You want the skill to verify service readiness before declaring setup complete.
 
+Do not use for:
+- live meeting recording itself
+- direct Meetily internal database integration
+- workflows that need multiple note formats from a single export at once
+
 ## Expected Export Shape
 
 ### Meetily folder export
@@ -85,15 +91,6 @@ Example:
   summary.md
   raw.md
 ```
-
-## Cleanup Behavior
-
-Default behavior is to keep the processed export in the exporter folder.
-
-You can also choose:
-- `keep` — leave the source export in place
-- `move` — move the source into `.processed/`
-- `delete` — remove the source export after successful processing
 
 ## Common Pitfalls
 
@@ -127,9 +124,27 @@ Always finish with a readiness check before telling the user the setup is done.
 - [ ] Duplicates are skipped via the processed database
 - [ ] No current sync or processor issues remain in logs/status output
 
+## Cleanup Behavior
+
+Default behavior is to keep the processed export in the exporter folder.
+
+You can also choose:
+- `keep` — leave the source export in place
+- `move` — move the source into `.processed/`
+- `delete` — remove the source export after successful processing
+
+## References
+
+- `references/exporter-format.md` — supported input shapes
+- `references/syncthing-setup.md` — split-machine Syncthing setup guide
+- `references/testing-guide.md` — final verification and troubleshooting checklist
+
 ## Files
 
 - `scripts/process_exporter.py` — main processor
 - `templates/summary-template.md` — summary template
+- `references/exporter-format.md` — export-shape notes
+- `references/syncthing-setup.md` — sync setup guide
+- `references/testing-guide.md` — readiness checklist
 - `hermes-meetily-watcher.service` — sample systemd unit for the server
 - `README.md` — usage notes
