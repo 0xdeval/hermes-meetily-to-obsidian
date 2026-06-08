@@ -10,7 +10,7 @@ Process Meetily exports from a Syncthing-synced inbox into structured Obsidian m
 4. Hermes writes:
    - `summary.md`
    - `raw.md`
-5. The source export is removed from the server inbox after successful processing.
+5. The source export is kept on the server by default so it can be reprocessed later.
 
 ## Supported export shape
 
@@ -43,6 +43,7 @@ python3 scripts/process_exporter.py \
 
 Useful options:
 - `--dry-run` — preview what would be processed
+- `--reprocess-all` — ignore the processed DB and regenerate notes for every export
 - `--cleanup-source move` — move processed exports into `.processed/`
 - `--cleanup-source keep` — leave the source export in place
 
@@ -50,4 +51,5 @@ Useful options:
 
 - The processor ignores `.stignore`, `.stfolder`, hidden files, and `.processed/`.
 - The processor uses a small SQLite DB (`processed.db`) to skip duplicates.
+- Use `--reprocess-all` when you want to rebuild notes from the same source exports after deleting the Obsidian notes.
 - The included `hermes-meetily-watcher.service` is a sample systemd unit for running it as a service on the server.

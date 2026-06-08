@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/hermes-meetily-to-obsidian
-ExecStart=/usr/bin/env python3 /root/hermes-meetily-to-obsidian/scripts/process_exporter.py --export-dir /root/meetily_exports --vault /root/Obsidian --cleanup-source delete
+ExecStart=/usr/bin/env python3 /root/hermes-meetily-to-obsidian/scripts/process_exporter.py --export-dir /root/meetily_exports --vault /root/Obsidian --cleanup-source keep
 Restart=on-failure
 
 [Install]

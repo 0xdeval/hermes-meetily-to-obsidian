@@ -12,8 +12,8 @@ Behavior
 - Writes into:
     <VAULT>/Meetings/dd-mm-yyyy/<short-title>/summary.md
     <VAULT>/Meetings/dd-mm-yyyy/<short-title>/raw.md
-- After success, removes the source export from the exporter folder
-  (delete by default, or move to .processed with --cleanup-source move)
+- After success, keeps the source export by default
+  (optional cleanup modes are available via --cleanup-source)
 
 This script is intentionally conservative: it only processes completed
 meeting folders/files and ignores Syncthing bookkeeping files.
@@ -221,28 +221,24 @@ def render_summary_template(template: str, data: dict[str, Any]) -> str:
     transcript_text = data.get("transcript_text", "")
     lines = [line.strip() for line in transcript_text.splitlines() if line.strip()]
 
-    # Split the transcript into two readable sections so the LLM can consume
-    # a compact human-readable transcript instead of the raw JSON payload.
-    section_1 = lines[:6]
-    section_2 = lines[6:12]
+    topic = data.get("meeting_name") or data.get("title") or "Meeting"
+    topic = topic.replace("_", " ").strip()
 
-    summary_body = [
-        f"date: {date_text}",
-        f"Participants: {participants}",
-        f"duration: {duration}",
-        "",
-        "### Current Status & Timeline Pressure",
-        "",
-    ]
-    summary_body.extend(section_1 or ["- No summary content extracted yet"])
-    summary_body.extend([
-        "",
-        "### Trial Process Constraints",
-        "",
-    ])
-    summary_body.extend(section_2 or ["- No trial constraints extracted yet"])
-    summary_body.append("")
-    return "\n".join(summary_body)
+    # Build a compact key-point list from the transcript. This is intentionally
+    # generic: the real topic extraction / structuring will later come from the LLM.
+    bullet_lines = []
+    for line in lines[:10]:
+        if line.startswith("-"):
+            bullet_lines.append(line)
+        else:
+            bullet_lines.append(f"- {line}")
+    key_points = "\n".join(bullet_lines) if bullet_lines else "- No key points extracted yet"
+
+    summary = template
+    summary = summary.replace("{{topic}}", topic)
+    summary = summary.replace("{{key_points}}", key_points)
+    summary += f"\nDate: {date_text}\nParticipants: {participants}\nDuration: {duration}\n"
+    return summary
 def render_duration(duration_seconds: Any) -> str:
     if isinstance(duration_seconds, (int, float)):
         mins = int(round(duration_seconds / 60))
@@ -301,9 +297,9 @@ def cleanup_source(path: Path, mode: str):
         path.unlink()
 
 
-def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str, cleanup_mode: str, dry_run: bool, min_age: int):
+def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str, cleanup_mode: str, dry_run: bool, min_age: int, reprocess_all: bool):
     fp = fingerprint_path(path)
-    if db.is_processed(str(path), fp):
+    if not reprocess_all and db.is_processed(str(path), fp):
         print(f"skip (already processed): {path}")
         return
 
@@ -354,8 +350,9 @@ def main():
     parser.add_argument("--export-dir", required=True)
     parser.add_argument("--vault", required=True)
     parser.add_argument("--min-age", type=int, default=30, help="Minimum age seconds before processing a file")
-    parser.add_argument("--cleanup-source", choices=["delete", "move", "keep"], default="delete")
+    parser.add_argument("--cleanup-source", choices=["delete", "move", "keep"], default="keep")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--reprocess-all", action="store_true", help="Ignore the processed DB and regenerate notes for every export")
     args = parser.parse_args()
 
     export_dir = Path(args.export_dir)
@@ -374,7 +371,7 @@ def main():
             if path.is_dir() and time.time() - path.stat().st_mtime < args.min_age:
                 print(f"skip (too new): {path}")
                 continue
-            process_export(path, vault, db, template_text, args.cleanup_source, args.dry_run, args.min_age)
+            process_export(path, vault, db, template_text, args.cleanup_source, args.dry_run, args.min_age, args.reprocess_all)
         except Exception as exc:
             print(f"error {path}: {exc}")
 

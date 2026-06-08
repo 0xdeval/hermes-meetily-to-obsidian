@@ -27,7 +27,7 @@ The workflow is:
 4. Hermes writes two notes into Obsidian:
    - `summary.md`
    - `raw.md`
-5. The processed export is removed from the export folder on the server so it is not reprocessed.
+5. The processed export is kept on the server by default so it can be reprocessed later.
 
 Meetings are stored under:
 
@@ -59,7 +59,7 @@ If the exporter writes a single markdown file instead, the processor will still 
 
 For each meeting:
 
-- `summary.md` — summary template filled from the meeting content
+- `summary.md` — topic-focused summary with key points around the topic
 - `raw.md` — full transcript text
 
 Example:
@@ -72,12 +72,12 @@ Example:
 
 ## Cleanup Behavior
 
-Default behavior is to delete the processed export from the exporter folder on the server.
+Default behavior is to keep the processed export in the exporter folder.
 
 You can also choose:
-- `delete` — remove the source export after successful processing
+- `keep` — leave the source export in place
 - `move` — move the source into `.processed/`
-- `keep` — leave the source in place
+- `delete` — remove the source export after successful processing
 
 ## Common Pitfalls
 
