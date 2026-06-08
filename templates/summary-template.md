@@ -1,21 +1,11 @@
-# {{title}}
+date: {{date}}
+Participants: {{participants}}
+duration: {{duration}}
 
-**Date:** {{date}}
-**Participants:** {{participants}}
-**Duration:** {{duration}}
+### Current Status & Timeline Pressure
 
-## TL;DR
+{{current_status}}
 
-{{tldr}}
+### Trial Process Constraints
 
-## Key points
-
-{{key_points}}
-
-## Action items
-
-{{action_items}}
-
-## Notes
-
-{{notes}}
+{{trial_constraints}}

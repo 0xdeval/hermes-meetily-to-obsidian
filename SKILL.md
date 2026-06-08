@@ -26,12 +26,12 @@ The workflow is:
 3. Hermes processes the synced export on the server.
 4. Hermes writes two notes into Obsidian:
    - `summary.md`
-   - `raw_transcript.md`
+   - `raw.md`
 5. The processed export is removed from the export folder on the server so it is not reprocessed.
 
 Meetings are stored under:
 
-`<VAULT>/Meetings/dd-mm--yyyy/<short-title>/`
+`<VAULT>/Meetings/dd-mm-yyyy/<short-title>/`
 
 ## When to Use
 
@@ -60,14 +60,14 @@ If the exporter writes a single markdown file instead, the processor will still 
 For each meeting:
 
 - `summary.md` — summary template filled from the meeting content
-- `raw_transcript.md` — full transcript text
+- `raw.md` — full transcript text
 
 Example:
 
 ```text
-/root/Obsidian/Meetings/02-06--2026/Meeting 2026-06-02 16-29-27/
+/root/Obsidian/Meetings/02-06-2026/Meeting 2026-06-02 16-29-27/
   summary.md
-  raw_transcript.md
+  raw.md
 ```
 
 ## Cleanup Behavior
@@ -100,7 +100,7 @@ You can also choose:
 
 - [ ] Syncthing export folder exists on the server
 - [ ] Meetily export folders contain `metadata.json` and `transcripts.json`
-- [ ] Obsidian receives `summary.md` and `raw_transcript.md`
+- [ ] Obsidian receives `summary.md` and `raw.md`
 - [ ] The processed server-side export is cleaned up
 - [ ] Duplicates are skipped via the processed database
 

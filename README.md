@@ -9,7 +9,7 @@ Process Meetily exports from a Syncthing-synced inbox into structured Obsidian m
 3. Hermes processes the synced export on the server.
 4. Hermes writes:
    - `summary.md`
-   - `raw_transcript.md`
+   - `raw.md`
 5. The source export is removed from the server inbox after successful processing.
 
 ## Supported export shape
@@ -28,7 +28,7 @@ A single markdown file with frontmatter and a transcript section.
 
 - Syncthing inbox: `/root/meetily_exports`
 - Obsidian vault: `/root/Obsidian`
-- Output: `/root/Obsidian/Meetings/dd-mm--yyyy/<meeting-title>/`
+- Output: `/root/Obsidian/Meetings/dd-mm-yyyy/<meeting-title>/`
 
 ## Processor
 

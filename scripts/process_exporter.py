@@ -10,8 +10,8 @@ Behavior
 - Skips files/directories that are not stable yet
 - Deduplicates by source path and meeting_id in a SQLite DB
 - Writes into:
-    <VAULT>/Meetings/dd-mm--yyyy/<short-title>/summary.md
-    <VAULT>/Meetings/dd-mm--yyyy/<short-title>/raw_transcript.md
+    <VAULT>/Meetings/dd-mm-yyyy/<short-title>/summary.md
+    <VAULT>/Meetings/dd-mm-yyyy/<short-title>/raw.md
 - After success, removes the source export from the exporter folder
   (delete by default, or move to .processed with --cleanup-source move)
 
@@ -166,7 +166,7 @@ def parse_meeting_folder(folder: Path) -> dict[str, Any]:
     transcript_text = "\n".join(lines).strip() or "- (no transcript text found)"
     title = slugify(meeting_name.replace("_", " "))
     date_source = completed_at or created_at or dt.datetime.utcnow().astimezone()
-    date_folder = date_source.strftime("%d-%m--%Y")
+    date_folder = date_source.strftime("%d-%m-%Y")
 
     return {
         "meeting_name": meeting_name,
@@ -203,7 +203,7 @@ def parse_markdown_export(path: Path) -> dict[str, Any]:
         "meeting_id": meta.get("meeting_id"),
         "created_at": date_source,
         "completed_at": date_source,
-        "date_folder": date_source.strftime("%d-%m--%Y"),
+        "date_folder": date_source.strftime("%d-%m-%Y"),
         "title": slugify(title.replace("_", " ")),
         "participants": meta.get("participants", ""),
         "duration_seconds": meta.get("duration"),
@@ -213,40 +213,41 @@ def parse_markdown_export(path: Path) -> dict[str, Any]:
 
 
 def render_summary_template(template: str, data: dict[str, Any]) -> str:
-    duration = data.get("duration_seconds")
-    if isinstance(duration, (int, float)):
-        duration_text = f"{duration/60:.1f} min"
-    else:
-        duration_text = str(duration or "")
-
-    title = data.get("meeting_name") or data.get("title") or "Meeting"
     date_value = data.get("completed_at") or data.get("created_at") or dt.datetime.utcnow().astimezone()
-    date_text = date_value.isoformat() if isinstance(date_value, dt.datetime) else str(date_value)
+    date_text = date_value.strftime("%d-%m-%Y") if isinstance(date_value, dt.datetime) else str(date_value)
+    duration = render_duration(data.get("duration_seconds"))
+    participants = str(data.get("participants", "")).strip()
 
     transcript_text = data.get("transcript_text", "")
-    lines = transcript_text.splitlines()
-    tldr = " ".join(
-        line.replace("- **", "").replace("** — ", ": ")
-        for line in lines[:3]
-    ).strip() or "Meeting summary generated from the transcript."
+    lines = [line.strip() for line in transcript_text.splitlines() if line.strip()]
 
-    key_points = "\n".join(lines[:8]) if lines else "- No key points extracted"
-    action_items = "- No action items extracted yet"
+    # Split the transcript into two readable sections so the LLM can consume
+    # a compact human-readable transcript instead of the raw JSON payload.
+    section_1 = lines[:6]
+    section_2 = lines[6:12]
 
-    replacements = {
-        "{{title}}": title,
-        "{{date}}": date_text,
-        "{{participants}}": str(data.get("participants", "")),
-        "{{duration}}": duration_text,
-        "{{tldr}}": tldr,
-        "{{key_points}}": key_points,
-        "{{action_items}}": action_items,
-        "{{notes}}": transcript_text,
-    }
-    result = template
-    for k, v in replacements.items():
-        result = result.replace(k, v)
-    return result
+    summary_body = [
+        f"date: {date_text}",
+        f"Participants: {participants}",
+        f"duration: {duration}",
+        "",
+        "### Current Status & Timeline Pressure",
+        "",
+    ]
+    summary_body.extend(section_1 or ["- No summary content extracted yet"])
+    summary_body.extend([
+        "",
+        "### Trial Process Constraints",
+        "",
+    ])
+    summary_body.extend(section_2 or ["- No trial constraints extracted yet"])
+    summary_body.append("")
+    return "\n".join(summary_body)
+def render_duration(duration_seconds: Any) -> str:
+    if isinstance(duration_seconds, (int, float)):
+        mins = int(round(duration_seconds / 60))
+        return f"{mins} min"
+    return str(duration_seconds or "")
 
 
 def candidate_exports(export_dir: Path):
@@ -300,25 +301,25 @@ def cleanup_source(path: Path, mode: str):
         path.unlink()
 
 
-def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str, cleanup_mode: str, dry_run: bool):
+def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str, cleanup_mode: str, dry_run: bool, min_age: int):
     fp = fingerprint_path(path)
     if db.is_processed(str(path), fp):
         print(f"skip (already processed): {path}")
         return
 
     if path.is_dir():
-        if not stable_dir(path, min_age=30):
+        if not stable_dir(path, min_age=min_age):
             print(f"skip (not stable yet): {path}")
             return
         data = parse_meeting_folder(path)
     else:
-        if not stable_file(path, min_age=30):
+        if not stable_file(path, min_age=min_age):
             print(f"skip (not stable yet): {path}")
             return
         data = parse_markdown_export(path)
 
     meeting_dir = vault / "Meetings" / data["date_folder"] / data["title"]
-    raw_path = meeting_dir / "raw_transcript.md"
+    raw_path = meeting_dir / "raw.md"
     summary_path = meeting_dir / "summary.md"
     meeting_dir.mkdir(parents=True, exist_ok=True)
 
@@ -329,11 +330,13 @@ def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str,
         return
 
     raw_body = data["transcript_text"]
+    raw_date = data.get("completed_at") or data.get("created_at") or ""
+    if isinstance(raw_date, dt.datetime):
+        raw_date = raw_date.strftime("%d-%m-%Y %H-%M")
     raw_header = [
-        f"# {data.get('meeting_name') or data.get('title') or 'Meeting'}",
-        f"Date: {data.get('completed_at') or data.get('created_at') or ''}",
+        f"Date: {raw_date}",
         f"Participants: {data.get('participants') or ''}",
-        f"Source: {path.name}",
+        f"Duration: {render_duration(data.get('duration_seconds'))}",
         "",
         raw_body,
         "",
@@ -371,7 +374,7 @@ def main():
             if path.is_dir() and time.time() - path.stat().st_mtime < args.min_age:
                 print(f"skip (too new): {path}")
                 continue
-            process_export(path, vault, db, template_text, args.cleanup_source, args.dry_run)
+            process_export(path, vault, db, template_text, args.cleanup_source, args.dry_run, args.min_age)
         except Exception as exc:
             print(f"error {path}: {exc}")
 
