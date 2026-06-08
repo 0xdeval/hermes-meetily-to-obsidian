@@ -39,6 +39,8 @@ SKIP_NAMES = {".processed", ".stfolder", ".stversions", ".DS_Store", ".stignore"
 DB_PATH = Path(__file__).parent.parent / "processed.db"
 TEMPLATE_PATH = Path(__file__).parent.parent / "templates" / "summary-template.md"
 MAX_SUMMARY_TRANSCRIPT_CHARS = 20000
+MAX_SUMMARY_CHARS = 2000
+MAX_SUMMARY_WORDS = 280
 
 
 def slugify(text: str) -> str:
@@ -246,7 +248,20 @@ def fallback_summary(template: str, data: dict[str, Any]) -> str:
     summary = summary.replace("{{overview}}", "\n".join(overview_lines))
     summary = summary.replace("{{topics}}", "\n\n".join(topic_chunks) or "### Topic 1\n- Summary unavailable.")
     summary = summary.replace("{{next_steps}}", "- No explicit next steps extracted.")
-    return summary.strip() + "\n"
+    return enforce_summary_limits(summary)
+
+
+def enforce_summary_limits(summary: str) -> str:
+    text = summary.strip()
+    words = text.split()
+    if len(words) > MAX_SUMMARY_WORDS:
+        text = " ".join(words[:MAX_SUMMARY_WORDS]).strip()
+
+    if len(text) > MAX_SUMMARY_CHARS:
+        text = text[:MAX_SUMMARY_CHARS].rstrip()
+
+    text = text.rstrip("-#* \n\t")
+    return text + "\n"
 
 
 def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
@@ -270,6 +285,7 @@ def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
         - Use concise, human-readable topic titles.
         - Mention important context, decisions, constraints, concerns, and next steps.
         - If there are no clear next steps, say so briefly.
+        - Hard cap the entire response to 280 words and 2000 characters maximum.
 
         Use exactly this structure:
         ## Overview
@@ -304,7 +320,7 @@ def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
     summary = (result.stdout or "").strip()
     if result.returncode != 0 or not summary:
         raise RuntimeError(f"Hermes summarization failed: {result.stderr.strip() or result.stdout.strip()}")
-    return summary + "\n"
+    return enforce_summary_limits(summary)
 
 
 def render_summary_template(template: str, data: dict[str, Any]) -> str:

@@ -59,7 +59,7 @@ If the exporter writes a single markdown file instead, the processor will still 
 
 For each meeting:
 
-- `summary.md` — Hermes-generated thematic summary without timestamps, grouped by topic
+- `summary.md` — Hermes-generated thematic summary without timestamps, grouped by topic, capped at 2000 characters and 280 words
 - `raw.md` — full transcript text
 
 Example:
