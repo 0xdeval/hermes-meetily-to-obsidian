@@ -1,7 +1,7 @@
 ---
 name: hermes-meetily-to-obsidian
 description: "Use when Meetily exports should be post-processed into structured Obsidian meeting notes with topology-aware setup, deduplication, summary generation, and readiness checks."
-version: 0.3.0
+version: 0.4.0
 author: 0xdeval + Mike Krupin
 license: MIT
 platforms: [linux, macos, windows]
@@ -81,8 +81,8 @@ If the exporter writes a single markdown file instead, the processor will still 
 
 For each meeting:
 
-- `summary.md` — Hermes-generated thematic summary without timestamps, grouped by topic, capped at 2000 characters and 280 words
-- `raw.md` — full transcript text
+- `summary.md` — Hermes-generated thematic summary with exact `Overview / Topics / Next steps` structure, semantic topic titles, preserved markdown line breaks, emphasis on material details, and at least 3 bullets per topic when the transcript supports it
+- `raw.md` — full merged transcript text plus compact metadata such as semantic title, source meeting name, date, duration, and exporter status
 
 Example:
 
@@ -97,16 +97,25 @@ Example:
 1. **Pointing the exporter directly at the Obsidian vault.**
    Keep the Syncthing export inbox separate from the vault so you do not create sync loops.
 
-2. **Processing partial files.**
-   The processor waits for the export to be old enough and stable before handling it.
+2. **Processing partial files or incomplete meetings.**
+   The processor must wait for the export to be old enough, stable, and marked completed in metadata before handling it.
 
-3. **Syncthing bookkeeping files being processed.**
+3. **Using the raw metadata timestamp as the Obsidian meeting title.**
+   The final note title should be inferred semantically from the conversation topic, with participant names included when they are clear.
+
+4. **Flattening markdown summaries into a single line.**
+   Any post-processing that joins words with spaces will break Obsidian rendering and turn headings/bullets into one block.
+
+5. **Creating thin topic sections with only 1-2 bullets.**
+   Prefer fewer, stronger topics; merge weak themes into neighboring sections unless the transcript truly contains only sparse information.
+
+6. **Syncthing bookkeeping files being processed.**
    The script ignores `.stignore`, `.stfolder`, `.processed`, and hidden files.
 
-4. **Expecting one source export to create multiple Obsidian notes.**
+7. **Expecting one source export to create multiple Obsidian notes.**
    This skill creates exactly one meeting folder per export.
 
-5. **Thinking cleanup will delete the Mac copy.**
+8. **Thinking cleanup will delete the Mac copy.**
    If the server is the processing side, cleanup only removes the synced server copy unless you also build a Mac-side delete hook.
 
 ## Verification Checklist
@@ -120,8 +129,12 @@ Always finish with a readiness check before telling the user the setup is done.
 - [ ] Server export folder exists and is writable
 - [ ] Obsidian vault exists and receives `summary.md` and `raw.md`
 - [ ] Meetily export folders contain `metadata.json` and `transcripts.json`
+- [ ] Meeting folders are processed only after metadata shows completion
+- [ ] Output title is semantic and topic-based, not just the exporter timestamp name
+- [ ] Summary uses exact `Overview / Topics / Next steps` structure with preserved markdown line breaks
+- [ ] Topic sections contain 3+ bullets when the transcript provides enough detail
+- [ ] Duplicates are skipped or reprocessed correctly via source fingerprint changes
 - [ ] Scheduler/service is running without current errors
-- [ ] Duplicates are skipped via the processed database
 - [ ] No current sync or processor issues remain in logs/status output
 
 ## Cleanup Behavior

@@ -39,15 +39,21 @@ SKIP_NAMES = {".processed", ".stfolder", ".stversions", ".DS_Store", ".stignore"
 DB_PATH = Path(__file__).parent.parent / "processed.db"
 TEMPLATE_PATH = Path(__file__).parent.parent / "templates" / "summary-template.md"
 MAX_SUMMARY_TRANSCRIPT_CHARS = 20000
-MAX_SUMMARY_CHARS = 2000
+MAX_SUMMARY_CHARS = 2600
 MAX_SUMMARY_WORDS = 280
+MAX_TITLE_TRANSCRIPT_CHARS = 6000
 
 
-def slugify(text: str) -> str:
-    text = text.strip()
-    text = re.sub(r"[^A-Za-z0-9 _-]", "", text)
+def sanitize_title(text: str) -> str:
+    text = text.strip().replace("_", " ")
+    text = re.sub(r'[\\/:*?"<>|]+', " ", text)
     text = re.sub(r"\s+", " ", text)
-    return text[:80].strip() or "meeting"
+    text = text.strip(" .-")
+    return text[:120].strip() or "Meeting"
+
+
+def fallback_title(text: str | None) -> str:
+    return sanitize_title(text or "Meeting")
 
 
 def parse_iso_datetime(value: str | None) -> dt.datetime | None:
@@ -81,23 +87,30 @@ class ProcessedDB:
             self.conn.execute("ALTER TABLE processed ADD COLUMN meeting_id TEXT")
         if "processed_at" not in cols:
             self.conn.execute("ALTER TABLE processed ADD COLUMN processed_at TEXT")
+        if "output_path" not in cols:
+            self.conn.execute("ALTER TABLE processed ADD COLUMN output_path TEXT")
         self.conn.commit()
 
     def is_processed(self, source_path: str, fingerprint: str | None = None) -> bool:
         cur = self.conn.cursor()
+        cur.execute("SELECT source_fingerprint FROM processed WHERE source_path = ?", (source_path,))
+        row = cur.fetchone()
+        if row is None:
+            return False
         if fingerprint is None:
-            cur.execute("SELECT 1 FROM processed WHERE source_path = ?", (source_path,))
-        else:
-            cur.execute(
-                "SELECT 1 FROM processed WHERE source_path = ? OR source_fingerprint = ?",
-                (source_path, fingerprint),
-            )
-        return cur.fetchone() is not None
+            return True
+        return row[0] == fingerprint
 
-    def mark_processed(self, source_path: str, fingerprint: str | None, meeting_id: str | None):
+    def output_path_for(self, source_path: str) -> str | None:
+        cur = self.conn.cursor()
+        cur.execute("SELECT output_path FROM processed WHERE source_path = ?", (source_path,))
+        row = cur.fetchone()
+        return row[0] if row and row[0] else None
+
+    def mark_processed(self, source_path: str, fingerprint: str | None, meeting_id: str | None, output_path: str | None):
         self.conn.execute(
-            "INSERT OR REPLACE INTO processed (source_path, source_fingerprint, meeting_id, processed_at) VALUES (?, ?, ?, ?)",
-            (source_path, fingerprint, meeting_id, dt.datetime.now(dt.timezone.utc).isoformat()),
+            "INSERT OR REPLACE INTO processed (source_path, source_fingerprint, meeting_id, processed_at, output_path) VALUES (?, ?, ?, ?, ?)",
+            (source_path, fingerprint, meeting_id, dt.datetime.now(dt.timezone.utc).isoformat(), output_path),
         )
         self.conn.commit()
 
@@ -156,6 +169,7 @@ def parse_meeting_folder(folder: Path) -> dict[str, Any]:
     completed_at = parse_iso_datetime(metadata.get("completed_at"))
     participants = metadata.get("participants") or ""
     duration_seconds = metadata.get("duration_seconds")
+    status = str(metadata.get("status") or "").strip().lower()
 
     segments = transcripts.get("segments") or []
     lines: list[str] = []
@@ -170,7 +184,6 @@ def parse_meeting_folder(folder: Path) -> dict[str, Any]:
             lines.append(f"- {text}")
 
     transcript_text = "\n".join(lines).strip() or "- (no transcript text found)"
-    title = slugify(meeting_name.replace("_", " "))
     date_source = completed_at or created_at or dt.datetime.now(dt.timezone.utc)
     date_folder = date_source.strftime("%d-%m-%Y")
 
@@ -180,9 +193,10 @@ def parse_meeting_folder(folder: Path) -> dict[str, Any]:
         "created_at": created_at,
         "completed_at": completed_at,
         "date_folder": date_folder,
-        "title": title,
+        "title": fallback_title(meeting_name),
         "participants": participants,
         "duration_seconds": duration_seconds,
+        "status": status,
         "transcript_text": transcript_text,
         "raw_json": {"metadata": metadata, "transcripts": transcripts},
     }
@@ -210,9 +224,10 @@ def parse_markdown_export(path: Path) -> dict[str, Any]:
         "created_at": date_source,
         "completed_at": date_source,
         "date_folder": date_source.strftime("%d-%m-%Y"),
-        "title": slugify(title.replace("_", " ")),
+        "title": fallback_title(title),
         "participants": meta.get("participants", ""),
         "duration_seconds": meta.get("duration"),
+        "status": "completed",
         "transcript_text": text,
         "raw_json": {"markdown": text},
     }
@@ -232,36 +247,157 @@ def normalize_transcript_for_summary(transcript_text: str) -> str:
     return text[:MAX_SUMMARY_TRANSCRIPT_CHARS].strip()
 
 
+def transcript_excerpt_for_title(transcript_text: str) -> str:
+    cleaned = normalize_transcript_for_summary(transcript_text)
+    return cleaned[:MAX_TITLE_TRANSCRIPT_CHARS].strip()
+
+
+def generate_meeting_title_with_hermes(data: dict[str, Any]) -> str:
+    transcript_excerpt = transcript_excerpt_for_title(data.get("transcript_text", ""))
+    default_title = fallback_title(data.get("meeting_name") or data.get("title") or "Meeting")
+    if not transcript_excerpt:
+        return default_title
+
+    participants = str(data.get("participants") or "").strip() or "Unknown"
+    prompt = textwrap.dedent(
+        f"""\
+        Create a concise Obsidian meeting title from this conversation.
+
+        Requirements:
+        - Return plain text only.
+        - Maximum 8 words.
+        - Prefer a semantic title based on the conversation topic, not the raw metadata timestamp.
+        - If participant names are obvious, use a format like 'Name A + Name B - Topic'.
+        - Do not include timestamps, file names, markdown, quotes, or filler words.
+
+        Fallback source meeting name: {data.get('meeting_name') or 'Meeting'}
+        Participants metadata: {participants}
+
+        Transcript excerpt:
+        {transcript_excerpt}
+        """
+    ).strip()
+
+    cmd = ["hermes", "chat", "-q", prompt, "-Q", "-t", "safe"]
+    env = os.environ.copy()
+    env["PYTHONWARNINGS"] = "ignore"
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    if result.returncode != 0:
+        raise RuntimeError(f"Hermes title generation failed: {result.stderr.strip() or result.stdout.strip()}")
+
+    title = (result.stdout or "").strip().splitlines()[0] if (result.stdout or "").strip() else ""
+    return sanitize_title(title) or default_title
+
+
+def choose_meeting_title(data: dict[str, Any]) -> str:
+    try:
+        return generate_meeting_title_with_hermes(data)
+    except Exception:
+        return fallback_title(data.get("meeting_name") or data.get("title") or "Meeting")
+
+
 def fallback_summary(template: str, data: dict[str, Any]) -> str:
     transcript_text = normalize_transcript_for_summary(data.get("transcript_text", ""))
     lines = [line for line in transcript_text.splitlines() if line]
     overview_lines = [f"- {line}" for line in lines[:3]] or ["- Summary unavailable."]
 
     topic_chunks = []
-    for idx, chunk_start in enumerate(range(0, min(len(lines), 12), 4), start=1):
-        chunk = lines[chunk_start : chunk_start + 4]
+    max_topic_source_lines = min(len(lines), 15)
+    for idx, chunk_start in enumerate(range(0, max_topic_source_lines, 3), start=1):
+        chunk = lines[chunk_start : chunk_start + 3]
         if not chunk:
             continue
         topic_chunks.append(f"### Topic {idx}\n" + "\n".join(f"- {line}" for line in chunk))
 
     summary = template
     summary = summary.replace("{{overview}}", "\n".join(overview_lines))
-    summary = summary.replace("{{topics}}", "\n\n".join(topic_chunks) or "### Topic 1\n- Summary unavailable.")
-    summary = summary.replace("{{next_steps}}", "- No explicit next steps extracted.")
-    return enforce_summary_limits(summary)
+    summary = summary.replace("{{topics}}", "\n\n".join(topic_chunks) or "### Topic 1\n- Summary unavailable.\n- No clear topic extracted.\n- Reprocess from a fuller transcript if available.")
+    summary = summary.replace("{{next_steps}}", "- No explicit next steps extracted.\n- Confirm any contract, scope, or timing assumptions directly from the raw transcript when needed.\n- Reprocess once more context is available if the export was sparse.")
+    return normalize_summary_structure(enforce_summary_limits(summary))
 
 
 def enforce_summary_limits(summary: str) -> str:
-    text = summary.strip()
-    words = text.split()
-    if len(words) > MAX_SUMMARY_WORDS:
-        text = " ".join(words[:MAX_SUMMARY_WORDS]).strip()
+    text = summary.replace("\r\n", "\n").strip()
+    if not text:
+        return ""
 
-    if len(text) > MAX_SUMMARY_CHARS:
-        text = text[:MAX_SUMMARY_CHARS].rstrip()
+    limited_lines: list[str] = []
+    word_count = 0
+    char_count = 0
 
-    text = text.rstrip("-#* \n\t")
-    return text + "\n"
+    for raw_line in text.split("\n"):
+        words = raw_line.split()
+        next_word_count = word_count + len(words)
+        line_len_with_newline = len(raw_line) + (1 if limited_lines else 0)
+        next_char_count = char_count + line_len_with_newline
+
+        if next_word_count > MAX_SUMMARY_WORDS or next_char_count > MAX_SUMMARY_CHARS:
+            break
+
+        limited_lines.append(raw_line.rstrip())
+        word_count = next_word_count
+        char_count = next_char_count
+
+    limited_text = "\n".join(limited_lines).strip()
+    if not limited_text:
+        limited_text = text[:MAX_SUMMARY_CHARS].strip()
+
+    limited_text = limited_text.rstrip()
+    return limited_text + "\n"
+
+
+def normalize_summary_structure(summary: str) -> str:
+    text = summary.replace("\r\n", "\n").strip()
+    if not text:
+        return "## Overview\n- Summary unavailable.\n\n## Topics\n### Topic 1\n- Summary unavailable.\n\n## Next steps\n- No explicit next steps extracted.\n"
+
+    def extract_section(section_name: str, next_sections: list[str]) -> str:
+        next_part = "|".join(re.escape(name) for name in next_sections)
+        if next_part:
+            pattern = rf"(?ms)^##\s+{re.escape(section_name)}\s*\n(.*?)(?=^##\s+(?:{next_part})\s*$|\Z)"
+        else:
+            pattern = rf"(?ms)^##\s+{re.escape(section_name)}\s*\n(.*)\Z"
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else ""
+
+    overview = extract_section("Overview", ["Topics", "Next steps"])
+    topics = extract_section("Topics", ["Next steps"])
+    next_steps = extract_section("Next steps", [])
+
+    if not overview:
+        overview = "- Summary unavailable."
+    if not topics:
+        topics = "### Topic 1\n- Summary unavailable."
+    if not next_steps:
+        next_steps = "- No explicit next steps extracted."
+
+    parts = [
+        "## Overview\n" + overview.strip(),
+        "## Topics\n" + topics.strip(),
+        "## Next steps\n" + next_steps.strip(),
+    ]
+    return "\n\n".join(parts).strip() + "\n"
+
+
+def summary_needs_repair(summary: str) -> bool:
+    text = normalize_summary_structure(summary)
+    if "## Overview" not in text or "## Topics" not in text or "## Next steps" not in text:
+        return True
+
+    topics_match = re.search(r"(?ms)^##\s+Topics\s*\n(.*?)(?=^##\s+Next steps\s*$|\Z)", text)
+    if not topics_match:
+        return True
+
+    topic_blocks = re.findall(r"(?ms)^###\s+.*?(?=^###\s+|\Z)", topics_match.group(1))
+    if not topic_blocks:
+        return True
+
+    thin_topics = 0
+    for block in topic_blocks:
+        bullet_count = len(re.findall(r"(?m)^- ", block))
+        if bullet_count < 3:
+            thin_topics += 1
+    return thin_topics > 0
 
 
 def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
@@ -279,16 +415,27 @@ def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
 
         Requirements:
         - Return markdown only.
+        - Use exactly these top-level sections in this order: `## Overview`, `## Topics`, `## Next steps`.
+        - Insert a blank line between every section and subsection.
+        - Do not include any top-level sections other than Overview, Topics, and Next steps.
+        - Under `## Topics`, use one or more `### Topic title` subsections.
+        - Prefer fewer, stronger topics over many thin topics.
+        - Do not create a topic subsection unless you can support it with 3 meaningful bullets, unless the transcript clearly contains only 1-2 important points for that theme.
+        - For each topic, include at least 3 bullet points when the transcript provides enough information.
+        - In every section, prioritize important details over generic phrasing.
+        - Explicitly capture conditions, constraints, contract-affecting details, risks, dependencies, tradeoffs, prior experience, seniority signals, responsibilities, decision criteria, and anything the speakers emphasized.
+        - Highlight what can materially influence the deal, hiring decision, scope, timeline, compensation, or working model.
         - Do not include timestamps.
         - Do not echo the transcript line-by-line.
         - Extract the main ideas and organize them into thematic sections.
         - Use concise, human-readable topic titles.
         - Mention important context, decisions, constraints, concerns, and next steps.
         - If there are no clear next steps, say so briefly.
-        - Hard cap the entire response to 280 words and 2000 characters maximum.
+        - Hard cap the entire response to 280 words and 2600 characters maximum.
 
         Use exactly this structure:
         ## Overview
+        - bullet
         - bullet
         - bullet
 
@@ -296,12 +443,15 @@ def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
         ### Topic title
         - bullet
         - bullet
+        - bullet
 
         ### Topic title
         - bullet
         - bullet
+        - bullet
 
         ## Next steps
+        - bullet
         - bullet
 
         Meeting name: {meeting_name}
@@ -320,7 +470,35 @@ def generate_summary_with_hermes(template: str, data: dict[str, Any]) -> str:
     summary = (result.stdout or "").strip()
     if result.returncode != 0 or not summary:
         raise RuntimeError(f"Hermes summarization failed: {result.stderr.strip() or result.stdout.strip()}")
-    return enforce_summary_limits(summary)
+
+    normalized_summary = normalize_summary_structure(enforce_summary_limits(summary))
+    if summary_needs_repair(normalized_summary):
+        repair_prompt = textwrap.dedent(
+            f"""\
+            Rewrite this meeting summary so it strictly follows the required structure.
+
+            Requirements:
+            - Return markdown only.
+            - Use exactly `## Overview`, `## Topics`, `## Next steps` in that order.
+            - Keep a blank line between sections and subsections.
+            - Prefer fewer, stronger topics over thin topics.
+            - Every topic under `## Topics` must have at least 3 meaningful bullets when the transcript provides enough detail.
+            - Preserve and emphasize material details: contract conditions, compensation, experience, risks, constraints, dependencies, scope, decision authority, and timeline.
+            - Stay within 280 words and 2600 characters.
+
+            Transcript:
+            {transcript_text}
+
+            Current draft:
+            {normalized_summary}
+            """
+        ).strip()
+        repair_result = subprocess.run(cmd[:2] + ["-q", repair_prompt, "-Q", "-t", "safe"], capture_output=True, text=True, timeout=600, env=env)
+        repaired = (repair_result.stdout or "").strip()
+        if repair_result.returncode == 0 and repaired:
+            normalized_summary = normalize_summary_structure(enforce_summary_limits(repaired))
+
+    return normalized_summary
 
 
 def render_summary_template(template: str, data: dict[str, Any]) -> str:
@@ -397,16 +575,27 @@ def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str,
             print(f"skip (not stable yet): {path}")
             return
         data = parse_meeting_folder(path)
+        if data.get("status") != "completed":
+            print(f"skip (status not completed): {path}")
+            return
+        completed_at = data.get("completed_at")
+        if isinstance(completed_at, dt.datetime):
+            completed_ts = completed_at.timestamp()
+            if time.time() - completed_ts < min_age:
+                print(f"skip (completed too recently): {path}")
+                return
     else:
         if not stable_file(path, min_age=min_age):
             print(f"skip (not stable yet): {path}")
             return
         data = parse_markdown_export(path)
 
+    data["title"] = choose_meeting_title(data)
     meeting_dir = vault / "Meetings" / data["date_folder"] / data["title"]
     raw_path = meeting_dir / "raw.md"
     summary_path = meeting_dir / "summary.md"
     meeting_dir.mkdir(parents=True, exist_ok=True)
+    previous_output_path = db.output_path_for(str(path))
 
     summary_text = render_summary_template(template_text, data)
 
@@ -419,9 +608,12 @@ def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str,
     if isinstance(raw_date, dt.datetime):
         raw_date = raw_date.strftime("%d-%m-%Y %H-%M")
     raw_header = [
+        f"Title: {data.get('title') or ''}",
+        f"Source meeting name: {data.get('meeting_name') or ''}",
         f"Date: {raw_date}",
         f"Participants: {data.get('participants') or ''}",
         f"Duration: {render_duration(data.get('duration_seconds'))}",
+        f"Status: {data.get('status') or ''}",
         "",
         raw_body,
         "",
@@ -429,8 +621,13 @@ def process_export(path: Path, vault: Path, db: ProcessedDB, template_text: str,
     raw_path.write_text("\n".join(raw_header), encoding="utf-8")
     summary_path.write_text(summary_text, encoding="utf-8")
 
+    if previous_output_path and previous_output_path != str(meeting_dir):
+        old_output_dir = Path(previous_output_path)
+        if old_output_dir.exists() and old_output_dir.is_dir():
+            shutil.rmtree(old_output_dir)
+
     cleanup_source(path, cleanup_mode)
-    db.mark_processed(str(path), fp, data.get("meeting_id"))
+    db.mark_processed(str(path), fp, data.get("meeting_id"), str(meeting_dir))
     print(f"processed {path} -> {meeting_dir}")
 
 
